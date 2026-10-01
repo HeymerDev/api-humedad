@@ -1,0 +1,39 @@
+{
+  "name": "api-humedad",
+  "version": "0.1.0",
+  "description": "API REST para la estación IoT (ESP32) con PostgreSQL + TimescaleDB en Neon",
+  "main": "dist/server.js",
+  "private": true,
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "helmet": "^8.3.0",
+    "morgan": "^1.12.1",
+    "pg": "^8.23.1",
+    "pg-hstore": "^2.3.4",
+    "reflect-metadata": "^0.2.2",
+    "sequelize": "^6.37.8",
+    "sequelize-typescript": "^2.1.6",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/morgan": "^1.9.10",
+    "@types/node": "^22.20.4",
+    "@types/pg": "^8.23.1",
+    "@types/validator": "^13.15.10",
+    "tsx": "^4.23.15",
+    "typescript": "~5.9"
+  }
+}
