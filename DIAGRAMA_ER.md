@@ -15,6 +15,7 @@ erDiagram
     tipos_sensor     |o--o{ reglas_umbral    : "regla general"
     sensores         |o--o{ reglas_umbral    : "regla específica"
     reglas_umbral    |o--o{ anomalias        : "detecta"
+    lecturas         |o--o{ anomalias        : "dispara"
     sensores         ||--o{ anomalias        : "presenta"
     sensores         ||--o{ alertas          : "genera"
     anomalias        |o--o{ alertas          : "origina"
@@ -50,7 +51,7 @@ erDiagram
 
     dispositivos {
         int         id                 PK
-        varchar     codigo             UK  "ej. ESP32-01 (lo envía el ESP32)"
+        varchar     codigo             UK  "ej. esp32_01 (lo envía el ESP32)"
         varchar     nombre
         text        descripcion
         varchar     modelo
@@ -68,7 +69,7 @@ erDiagram
         int         id                 PK
         int         dispositivo_id     FK  "UK (dispositivo_id, etiqueta)"
         int         tipo_sensor_id     FK
-        varchar     etiqueta               "ej. temp, hum (la envía el ESP32)"
+        varchar     etiqueta               "ej. temperatura_aire (la envía el ESP32)"
         varchar     nombre
         text        descripcion
         varchar     pin
@@ -109,15 +110,15 @@ erDiagram
         bigint      id                 PK  "NUEVA - HYPERTABLE - chunk 7 días"
         timestamptz registrado_en      PK  "dimensión de tiempo"
         int         dispositivo_id     FK
-        boolean     wifi_conectado
+        boolean     ntp_sincronizado       "reloj del ESP32 sincronizado"
         int         rssi_dbm
-        varchar     direccion_ip
+        text        direccion_ip
         bigint      uptime_s
         int         heap_libre_bytes
         int         lecturas_en_buffer     "pendientes de enviar en el ESP32"
         int         reconexiones_wifi
         int         envios_fallidos
-        varchar     version_firmware
+        text        version_firmware
     }
 
     reglas_umbral {
@@ -134,7 +135,7 @@ erDiagram
         int         ventana_minutos
         int         minimo_muestras
         boolean     activa
-        int         sensor_id          FK  "alcance: sensor O tipo (excluyentes)"
+        int         sensor_id          FK  "alcance: sensor, tipo o global (ambos NULL)"
         int         tipo_sensor_id     FK
         timestamptz creado_en
         timestamptz actualizado_en
@@ -144,8 +145,8 @@ erDiagram
         int         id                 PK
         int         sensor_id          FK
         int         regla_id           FK  "NUEVA"
-        bigint      lectura_id             "NUEVA - referencia lógica a lecturas"
-        timestamptz lectura_medido_en
+        bigint      lectura_id         FK  "NUEVA - FK compuesta a lecturas (id, medido_en)"
+        timestamptz lectura_medido_en  FK
         varchar     tipo                   "FUERA_DE_RANGO | VALOR_CONGELADO | SALTO_BRUSCO | OUTLIER_ESTADISTICO | SENSOR_SIN_DATOS"
         varchar     metodo
         varchar     severidad
@@ -177,8 +178,8 @@ erDiagram
 
     opciones_menu {
         int         id                 PK  "NUEVA"
-        varchar     tecla              UK  "1..7 del teclado matricial"
-        varchar     titulo                 "texto corto para el LCD"
+        varchar     tecla              UK  "0-9 o A-D del teclado 4x4"
+        varchar     titulo                 "ASCII, máx. 16 caracteres (LCD)"
         text        descripcion
         text        concepto_analitica     "concepto del Taller 1 que aplica"
         varchar     endpoint               "ruta de la API que la resuelve"
@@ -219,12 +220,18 @@ erDiagram
 ## Notas de diseño
 
 - **Hypertables**: `lecturas` (chunk de 1 día) y `estados_conexion` (chunk de 7 días).
-  La justificación completa está en `docs/timescaledb.md` (tarea 1).
+  La justificación completa está en [`docs/timescaledb.md`](docs/timescaledb.md).
 - TimescaleDB exige que la columna de tiempo forme parte de la PK; por eso ambas
   usan PK compuesta `(id, <columna de tiempo>)`.
-- `anomalias.lectura_id` es una referencia lógica (sin FK) porque las FK hacia
-  una hypertable solo existen desde TimescaleDB 2.16 y no está garantizado en Neon.
-- `reglas_umbral` aplica a un sensor concreto **o** a todo un tipo de sensor
-  (CHECK de alcance exclusivo).
+- `anomalias (lectura_id, lectura_medido_en)` es una FK compuesta hacia la
+  hypertable `lecturas`, que TimescaleDB 2.24 admite. Si se borra la lectura,
+  la anomalía se conserva con `lectura_id = NULL`. En `SENSOR_SIN_DATOS` no hay
+  lectura, así que `lectura_id` queda en NULL.
+- `reglas_umbral` aplica a un sensor concreto, a todo un tipo de sensor o a
+  todos (global, ambos NULL). Un CHECK impide llenar los dos a la vez, y otro
+  exige los parámetros que necesita cada `tipo_anomalia`.
 - `alertas` agrupa anomalías repetidas del mismo sensor y tipo: en vez de crear
   una alerta por cada lectura incrementa `ocurrencias` y `ultima_ocurrencia_en`.
+  Un índice único parcial garantiza una sola alerta activa por sensor y tipo.
+- La vista `v_lecturas_detalle` (no es tabla) une lecturas, sensor, tipo,
+  dispositivo y ubicación para FlowiseAI.
