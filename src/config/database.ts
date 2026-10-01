@@ -1,6 +1,18 @@
 import 'reflect-metadata';
+import pg from 'pg';
+import { DataTypes } from 'sequelize';
 import { Sequelize } from 'sequelize-typescript';
+import { modelos } from '../models';
 import { env } from './env';
+
+// pg entrega BIGINT (COUNT(*), ids de las hypertables) y NUMERIC como texto
+// para no perder precisión. Aquí todos caben en un double (ids < 2^53, rangos
+// con 4 decimales), así que se convierten a number y el JSON sale limpio.
+pg.types.setTypeParser(pg.types.builtins.INT8, (valor) => Number(valor));
+// Sequelize registra su propio parser de NUMERIC (devuelve string); se reemplaza.
+(DataTypes as unknown as { postgres: { DECIMAL: { parse: (valor: string) => number } } }).postgres.DECIMAL.parse = (
+  valor,
+) => Number(valor);
 
 /**
  * Conexión única a Neon (PostgreSQL + TimescaleDB).
@@ -27,8 +39,7 @@ export const sequelize = new Sequelize(env.DATABASE_URL, {
     createdAt: 'creado_en',
     updatedAt: 'actualizado_en',
   },
-  // Los modelos se registran aquí a medida que se crean (tarea 3).
-  models: [],
+  models: modelos,
 });
 
 /** Mide la latencia de un `SELECT 1` contra la base de datos. */

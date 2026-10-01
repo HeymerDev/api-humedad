@@ -18,7 +18,10 @@
     // Regla del proyecto: SIEMPRE declarar el DataType en @Column(...),
     // porque tsx (esbuild) no emite la metadata de tipos en desarrollo.
     "experimentalDecorators": true,
-    "emitDecoratorMetadata": true
+    "emitDecoratorMetadata": true,
+    // Con ES2022 los campos de clase se definirían como propiedades propias y
+    // taparían los getters de Sequelize (los atributos saldrían undefined).
+    "useDefineForClassFields": false
   },
   "include": ["src"]
 }
