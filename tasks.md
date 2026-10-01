@@ -53,40 +53,44 @@ api-humedad/
 - Commits: Conventional Commits en español (`feat:`, `fix:`, `chore:`, `docs:`,
   `refactor:`, `test:`). Los ejecuta el dueño del repo, no el asistente.
 
-**Limitación de Neon a tener en cuenta**: Neon trae TimescaleDB en edición
-Apache 2. Hypertables, chunks, `time_bucket`, `first/last`, `show_chunks`,
-`drop_chunks` y `set_chunk_time_interval` funcionan; compresión, *continuous
-aggregates* y políticas de retención automáticas normalmente **no**. Se verifica
-en la tarea 1 con `SHOW timescaledb.license;`.
+**Limitación de Neon (verificada)**: PostgreSQL 18.6 + TimescaleDB 2.24.0 con
+licencia `apache`. Hypertables, chunks, `time_bucket`, `first/last`,
+`show_chunks`, `drop_chunks`, `set_chunk_time_interval` y FK hacia hypertables
+funcionan. Compresión, *continuous aggregates*, políticas automáticas y
+`time_bucket_gapfill` **no** están disponibles. Detalle en `docs/timescaledb.md`.
 
 ---
 
 ## Contrato con el ESP32 (borrador, se fija en las tareas 6, 9 y 10)
+
+Estación real (ya en la BD): dispositivo `esp32_01` con los sensores
+`temperatura_aire` y `humedad_aire` (DHT22) y `temperatura_agua` (DS18B20).
 
 Ingesta, cada 20 s o al vaciar el buffer tras una caída:
 
 ```http
 POST /api/v1/lecturas
 {
-  "dispositivo": "ESP32-01",
+  "dispositivo": "esp32_01",
   "origen": "TIEMPO_REAL",          // o "BUFFER" al reenviar lo acumulado offline
   "intento": 1,                     // nº de reintento del mismo envío
   "enviado_en": 1790000000,         // epoch en segundos (NTP), opcional
   "lecturas": [
-    { "sensor": "temp", "valor": 24.6, "medido_en": 1790000000 },
-    { "sensor": "hum",  "valor": 61.3, "medido_en": 1790000000 }
+    { "sensor": "temperatura_aire", "valor": 24.6, "medido_en": 1790000000 },
+    { "sensor": "humedad_aire",     "valor": 61.3, "medido_en": 1790000000 },
+    { "sensor": "temperatura_agua", "valor": 19.8, "medido_en": 1790000000 }
   ]
 }
-→ 201 { "data": { "lote_id": 123, "aceptadas": 2, "rechazadas": 0, "anomalias": 0, "hora_servidor": 1790000001 } }
+→ 201 { "data": { "lote_id": 123, "aceptadas": 3, "rechazadas": 0, "anomalias": 0, "hora_servidor": 1790000001 } }
 ```
 
 `medido_en` acepta epoch (s) o ISO-8601; si falta se usa la hora del servidor.
 `hora_servidor` le sirve al ESP32 si el NTP falla.
 
-Latido (cada 60 s): `POST /api/v1/dispositivos/ESP32-01/estados-conexion`
-con `{ rssi_dbm, ip, uptime_s, heap_libre_bytes, lecturas_en_buffer, reconexiones_wifi, envios_fallidos, version_firmware }`.
+Latido (cada 60 s): `POST /api/v1/dispositivos/esp32_01/estados-conexion`
+con `{ ntp_sincronizado, rssi_dbm, ip, uptime_s, heap_libre_bytes, lecturas_en_buffer, reconexiones_wifi, envios_fallidos, version_firmware }`.
 
-Menú: `GET /api/v1/analitica/<opcion>?dispositivo=ESP32-01&lcd=16x2` → JSON
+Menú: `GET /api/v1/analitica/<opcion>?dispositivo=esp32_01&lcd=16x2` → JSON
 pequeño con `data` + `lcd` (líneas ya recortadas al ancho del display).
 
 | Tecla | Endpoint | Concepto de analítica |
@@ -117,64 +121,62 @@ pequeño con `data` + `lcd` (líneas ya recortadas al ancho del display).
 
 ---
 
-### [ ] 1. Script SQL completo, hypertables y chunks
+### [x] 1. Script SQL completo, hypertables y chunks
 
-**Antes de empezar (decisión tuya)**: ¿los datos actuales de Neon son de prueba
-y se pueden borrar, o hay que conservarlos? Define si `schema.sql` recrea las
-tablas o las migra con `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`.
+**Decisión**: se **conservan los datos** (3.039 lecturas reales de `esp32_01`,
+que además cubren el mínimo de 3.000 registros de FlowiseAI). `schema.sql`
+sirve para una base vacía y para la del esquema v1: las columnas nuevas se
+agregan con `ADD COLUMN IF NOT EXISTS` y las restricciones en bloques `DO`.
 
-- `database/schema.sql` idempotente (se puede correr varias veces):
-  - `CREATE EXTENSION IF NOT EXISTS timescaledb;`
-  - Las 12 tablas con PK, FK, `CHECK`, `UNIQUE`, índices y `COMMENT ON`.
-  - Columnas nuevas en tablas existentes: `lecturas.lote_id`, `lecturas.valor_crudo`,
-    `reglas_umbral.tipo_anomalia`, `anomalias.regla_id`, `anomalias.lectura_id`,
-    `alertas.tipo`, `alertas.ultima_ocurrencia_en`.
-  - Hypertables: `lecturas` (1 día) y `estados_conexion` (7 días), con
-    `create_hypertable(..., if_not_exists => TRUE)` y `set_chunk_time_interval`
-    (el chunk actual es de 7 días; el cambio solo afecta a chunks nuevos).
-  - Vista `v_lecturas_detalle` (lecturas + sensor + tipo + dispositivo + ubicación)
-    para KNIME y FlowiseAI.
-- `src/database/ejecutar-sql.ts` + scripts `npm run db:schema`.
-- `database/consultas/evidencias.sql`: versión y licencia de TimescaleDB,
-  `timescaledb_information.hypertables`, `.dimensions`, `.chunks`,
-  `chunks_detailed_size`, filas por chunk.
-- `docs/timescaledb.md`: qué es un chunk, cálculo de volumen (tabla del taller),
-  tamaño estimado por chunk y justificación de 1 día / 7 días.
+- `database/schema.sql` idempotente: 12 tablas con PK, FK, `CHECK`, `UNIQUE`,
+  índices y `COMMENT ON`; columnas v2 (`lecturas.lote_id`, `lecturas.valor_crudo`,
+  `reglas_umbral.tipo_anomalia` con backfill, `anomalias.regla_id`,
+  `anomalias.lectura_id`, `alertas.tipo`, `alertas.ultima_ocurrencia_en`);
+  hypertables `lecturas` (1 día) y `estados_conexion` (7 días); FK compuesta
+  `anomalias → lecturas`; índice único parcial de alertas activas; vista
+  `v_lecturas_detalle`.
+- `src/database/ejecutar-sql.ts`: ejecuta un `.sql` en una transacción, con
+  `--probar` (ROLLBACK) y `--todo`. Scripts `db:schema`, `db:seed`, `db:evidencias`.
+- `database/consultas/evidencias.sql` y `docs/timescaledb.md` (volumen,
+  tamaño medido de ~232 B/fila, justificación de chunks, chunk exclusion,
+  limitaciones de Neon y el cuidado con `drop_chunks`).
 
-**Aceptación**: `npm run db:schema` corre dos veces seguidas sin error; las dos
-hypertables aparecen en `timescaledb_information.hypertables`.
+**Verificado**: probado en una base vacía (esquema temporal) y en la real,
+dos veces cada una; aplicado en Neon dos veces sin errores.
 
 **Commit**: `feat(db): agregar esquema SQL con 12 tablas e hypertables de TimescaleDB`
 
 ---
 
-### [ ] 2. Datos semilla
+### [x] 2. Datos semilla
 
-**Antes de empezar (decisión tuya)**: confirmar qué sensores asignó el docente
-(por defecto: DHT22 temperatura y humedad en un ESP32).
+- `database/seed.sql` idempotente (`ON CONFLICT DO NOTHING`), alineado con los
+  datos existentes: 3 `tipos_sensor`, la ubicación, `esp32_01`, sus 3 `sensores`,
+  8 `reglas_umbral` (las 4 v1 + salto brusco del aire, valor congelado y sensor
+  sin datos) y las 7 `opciones_menu` con su concepto de analítica.
 
-- `database/seed.sql` idempotente (`ON CONFLICT DO NOTHING`):
-  `tipos_sensor`, una `ubicaciones`, el `dispositivos` ESP32-01, sus `sensores`,
-  `reglas_umbral` por tipo (rango, salto brusco, z-score, valor congelado,
-  sin datos) y las 7 `opciones_menu`.
-- Script `npm run db:seed`.
+**Verificado**: `npm run db:seed` dos veces deja 3 tipos, 1 ubicación,
+1 dispositivo, 3 sensores, 8 reglas y 7 opciones.
 
-**Aceptación**: `npm run db:seed` dos veces no duplica filas.
-
-**Commit**: `feat(db): agregar datos semilla de sensores, reglas y menú`
+**Commit**: `feat(db): agregar datos semilla de reglas y opciones del menú`
 
 ---
 
-### [ ] 3. Modelos sequelize-typescript
+### [x] 3. Modelos sequelize-typescript
 
-- `src/models/*.model.ts` para las 12 tablas, con asociaciones
-  (`@BelongsTo`, `@HasMany`), `tableName`, timestamps mapeados a
-  `creado_en`/`actualizado_en` donde existan, PK compuesta en las hypertables.
-- `src/models/index.ts` y registro en `database.ts`.
-- `src/database/verificar-modelos.ts` (`npm run db:verificar`): compara cada
-  modelo con `describeTable` y avisa columnas faltantes o sobrantes.
+- `src/models/*.model.ts` (12) tipados con `InferAttributes` /
+  `InferCreationAttributes`, asociaciones `@BelongsTo` / `@HasMany` con FK
+  explícita, timestamps mapeados a las columnas reales y PK compuesta en las
+  hypertables. `src/models/enums.ts` con los valores de los `CHECK`.
+- `database.ts`: registra los modelos y convierte `BIGINT`/`NUMERIC` a `number`.
+- `tsconfig.json`: `useDefineForClassFields: false` (si no, los campos de clase
+  tapan los getters de Sequelize).
+- `src/database/verificar-modelos.ts` (`npm run db:verificar`): compara nombre,
+  tipo y nulabilidad de cada columna con la BD, prueba las asociaciones y
+  escribe en las 12 tablas dentro de una transacción revertida.
 
-**Aceptación**: `npm run typecheck` y `npm run db:verificar` sin diferencias.
+**Verificado**: `npm run typecheck` sin errores y `npm run db:verificar` →
+12/12 modelos coinciden con la BD.
 
 **Commit**: `feat(models): agregar modelos de las 12 tablas con sus asociaciones`
 
@@ -211,6 +213,9 @@ hypertables aparecen en `timescaledb_information.hypertables`.
   1. Busca el dispositivo por `codigo` y los sensores por `etiqueta`.
   2. Aplica calibración (`valor = crudo * escala + offset`), guarda `valor_crudo`.
   3. Fuera del rango físico del tipo → `calidad = 'INVALIDA'` (se guarda, no se descarta).
+     Rechazar `NaN`/`Infinity` (el DHT22 los produce al fallar). Mantener la regla
+     del proyecto anterior: el DS18B20 reporta exactamente `0.0` cuando no
+     responde → `calidad = 'SOSPECHOSA'` (así están 1.005 lecturas actuales).
   4. Crea el `lotes_envio` (origen, intento, aceptadas/rechazadas, errores, duración).
   5. Inserta las `lecturas` con `bulkCreate` y actualiza `dispositivos.ultima_conexion` e IP.
 - `GET /api/v1/lecturas` con filtros `sensor_id`, `dispositivo`, `desde`, `hasta` (rango obligatorio, máx. 31 días) y paginación.

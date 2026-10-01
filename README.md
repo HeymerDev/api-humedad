@@ -13,7 +13,20 @@ npm install
 ```
 
 Copia `.env.example` como `.env` (ya existe uno local) y pega la cadena de
-conexión de Neon en `DATABASE_URL`. Luego:
+conexión de Neon en `DATABASE_URL`.
+
+Prepara la base de datos. Los dos scripts son idempotentes y conservan los
+datos existentes:
+
+```bash
+npm run db:schema
+```
+
+```bash
+npm run db:seed
+```
+
+Arranca la API:
 
 ```bash
 npm run dev
@@ -30,8 +43,16 @@ Comprueba la conexión en `http://localhost:3000/health`
 | `npm run build` | Compila a `dist/` |
 | `npm start` | Ejecuta la versión compilada |
 | `npm run typecheck` | Verifica tipos sin compilar |
+| `npm run db:schema` | Aplica `database/schema.sql`: 12 tablas, 2 hypertables, vista |
+| `npm run db:seed` | Aplica `database/seed.sql`: sensores, reglas, menú del teclado |
+| `npm run db:evidencias` | Muestra hypertables, chunks, tamaños y chunk exclusion |
+| `npm run db:verificar` | Comprueba que los 12 modelos coinciden con la BD |
+
+Para validar un script SQL sin dejar cambios:
+`npx tsx src/database/ejecutar-sql.ts <archivo.sql> --probar` (hace ROLLBACK).
 
 ## Documentación
 
 - [`DIAGRAMA_ER.md`](DIAGRAMA_ER.md): modelo entidad-relación (12 tablas, 2 hypertables).
+- [`docs/timescaledb.md`](docs/timescaledb.md): chunks, cálculo de volumen y justificación del intervalo.
 - [`tasks.md`](tasks.md): plan de implementación, convenciones y contrato con el ESP32.
