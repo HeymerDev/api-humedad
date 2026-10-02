@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import { alertasRouter } from '../modules/alertas/alertas.routes';
+import { analiticaRouter } from '../modules/analitica/analitica.routes';
 import { anomaliasRouter } from '../modules/anomalias/anomalias.routes';
+import { consultasMenuRouter } from '../modules/consultas-menu/consultas-menu.routes';
 import { dispositivosRouter } from '../modules/dispositivos/dispositivos.routes';
 import { estadosConexionRouter } from '../modules/estados-conexion/estados-conexion.routes';
 import { lecturasRouter } from '../modules/lecturas/lecturas.routes';
@@ -8,6 +10,7 @@ import { lotesEnvioRouter } from '../modules/lotes-envio/lotes-envio.routes';
 import { opcionesMenuRouter } from '../modules/opciones-menu/opciones-menu.routes';
 import { reglasUmbralRouter } from '../modules/reglas-umbral/reglas-umbral.routes';
 import { sensoresRouter } from '../modules/sensores/sensores.routes';
+import { timescaleRouter } from '../modules/timescale/timescale.routes';
 import { tiposSensorRouter } from '../modules/tipos-sensor/tipos-sensor.routes';
 import { ubicacionesRouter } from '../modules/ubicaciones/ubicaciones.routes';
 import { vigilanciaRouter } from '../modules/vigilancia/vigilancia.routes';
@@ -28,6 +31,9 @@ const recursos = {
   '/anomalias': anomaliasRouter,
   '/alertas': alertasRouter,
   '/vigilancia': vigilanciaRouter,
+  '/analitica': analiticaRouter,
+  '/consultas-menu': consultasMenuRouter,
+  '/timescale': timescaleRouter,
 };
 
 for (const [ruta, router] of Object.entries(recursos)) apiRouter.use(ruta, router);
