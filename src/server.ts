@@ -1,6 +1,7 @@
 import { app } from './app';
 import { sequelize } from './config/database';
 import { env } from './config/env';
+import { detenerVigilancia, iniciarVigilancia } from './modules/vigilancia/vigilancia.service';
 
 async function iniciar() {
   try {
@@ -13,10 +14,12 @@ async function iniciar() {
 
   const servidor = app.listen(env.PORT, () => {
     console.log(`API escuchando en http://localhost:${env.PORT} (${env.NODE_ENV})`);
+    iniciarVigilancia();
   });
 
   const apagar = async (senal: string) => {
     console.log(`${senal} recibido, cerrando...`);
+    detenerVigilancia();
     servidor.close();
     await sequelize.close();
     process.exit(0);
