@@ -1,0 +1,215 @@
+### =====================================================================
+###  api-humedad · Peticiones de ejemplo
+###  Abrir en VS Code con la extensión "REST Client" (humao.rest-client)
+###  y pulsar "Send Request" sobre cada bloque.
+### =====================================================================
+
+@base = http://localhost:3000/api/v1
+
+### Salud de la API y de la BD (latencia a Neon)
+GET http://localhost:3000/health
+
+### Recursos disponibles
+GET {{base}}
+
+
+### =====================================================================
+###  Ingesta del ESP32
+### =====================================================================
+
+### Lote en tiempo real (medido_en en epoch segundos o ISO-8601)
+POST {{base}}/lecturas
+Content-Type: application/json
+
+{
+  "dispositivo": "esp32_01",
+  "origen": "TIEMPO_REAL",
+  "intento": 1,
+  "lecturas": [
+    { "sensor": "temperatura_aire", "valor": 24.6 },
+    { "sensor": "humedad_aire", "valor": 61.3 },
+    { "sensor": "temperatura_agua", "valor": 19.8 }
+  ]
+}
+
+### Lote acumulado offline (buffer del ESP32) con la hora de cada lectura
+POST {{base}}/lecturas
+Content-Type: application/json
+
+{
+  "dispositivo": "esp32_01",
+  "origen": "BUFFER",
+  "intento": 1,
+  "enviado_en": "2026-10-01T10:05:00-05:00",
+  "lecturas": [
+    { "sensor": "temperatura_aire", "valor": 23.9, "medido_en": "2026-10-01T10:00:00-05:00" },
+    { "sensor": "temperatura_aire", "valor": 24.0, "medido_en": "2026-10-01T10:00:20-05:00" }
+  ]
+}
+
+### Lecturas (por defecto últimas 24 h; rango máximo 31 días)
+GET {{base}}/lecturas?dispositivo=esp32_01&limit=20
+
+### Lecturas de un sensor en un rango y con calidad OK
+GET {{base}}/lecturas?sensor_id=1&desde=2026-09-07T00:00:00Z&hasta=2026-09-08T00:00:00Z&calidad=OK&orden=asc
+
+### Lotes recibidos (auditoría de envíos y reintentos)
+GET {{base}}/lotes-envio?dispositivo=esp32_01
+
+### Solo lotes con lecturas rechazadas
+GET {{base}}/lotes-envio?con_rechazos=true
+
+### Detalle de un lote con sus lecturas
+GET {{base}}/lotes-envio/1
+
+
+### =====================================================================
+###  Dispositivos (`:id` acepta id o código)
+### =====================================================================
+
+GET {{base}}/dispositivos
+
+###
+GET {{base}}/dispositivos/esp32_01
+
+### Sensores del dispositivo con su tipo
+GET {{base}}/dispositivos/esp32_01/sensores
+
+###
+POST {{base}}/dispositivos
+Content-Type: application/json
+
+{
+  "codigo": "esp32_02",
+  "nombre": "Estación 2",
+  "ubicacion_id": 1,
+  "direccion_mac": "24:6F:28:AA:BB:CC"
+}
+
+### Desactivar (en vez de borrar si ya tiene lecturas)
+PATCH {{base}}/dispositivos/esp32_02
+Content-Type: application/json
+
+{ "activo": false }
+
+###
+DELETE {{base}}/dispositivos/esp32_02
+
+
+### =====================================================================
+###  Sensores
+### =====================================================================
+
+GET {{base}}/sensores?dispositivo_id=1
+
+###
+GET {{base}}/sensores/1
+
+### Ajustar la calibración (valor = crudo * escala + offset)
+PATCH {{base}}/sensores/1
+Content-Type: application/json
+
+{ "offset_calibracion": -0.3 }
+
+###
+POST {{base}}/sensores
+Content-Type: application/json
+
+{
+  "etiqueta": "humedad_suelo",
+  "nombre": "Humedad del suelo",
+  "pin": "GPIO34",
+  "dispositivo_id": 1,
+  "tipo_sensor_id": 2
+}
+
+
+### =====================================================================
+###  Tipos de sensor (`:id` acepta id o código)
+### =====================================================================
+
+GET {{base}}/tipos-sensor
+
+###
+GET {{base}}/tipos-sensor/DHT22_TEMP
+
+###
+POST {{base}}/tipos-sensor
+Content-Type: application/json
+
+{
+  "codigo": "LDR_LUZ",
+  "nombre": "Fotorresistencia LDR",
+  "magnitud": "luminosidad",
+  "unidad": "%",
+  "rango_min": 0,
+  "rango_max": 100
+}
+
+
+### =====================================================================
+###  Ubicaciones
+### =====================================================================
+
+GET {{base}}/ubicaciones
+
+###
+PATCH {{base}}/ubicaciones/1
+Content-Type: application/json
+
+{ "latitud": 4.6097, "longitud": -74.0817, "altitud_m": 2640 }
+
+
+### =====================================================================
+###  Reglas del detector de anomalías
+### =====================================================================
+
+GET {{base}}/reglas-umbral?activa=true
+
+### Regla de rango solo para un sensor
+POST {{base}}/reglas-umbral
+Content-Type: application/json
+
+{
+  "nombre": "Agua demasiado caliente",
+  "tipo_anomalia": "FUERA_DE_RANGO",
+  "severidad": "ALTA",
+  "valor_max": 35,
+  "sensor_id": 3
+}
+
+### Outlier por IQR para todas las magnitudes
+POST {{base}}/reglas-umbral
+Content-Type: application/json
+
+{
+  "nombre": "Outlier IQR - todas las magnitudes",
+  "tipo_anomalia": "OUTLIER_ESTADISTICO",
+  "metodo": "IQR",
+  "severidad": "BAJA",
+  "factor": 1.5,
+  "ventana_minutos": 60,
+  "minimo_muestras": 30
+}
+
+### Desactivar una regla
+PATCH {{base}}/reglas-umbral/1
+Content-Type: application/json
+
+{ "activa": false }
+
+
+### =====================================================================
+###  Menú del teclado matricial
+### =====================================================================
+
+GET {{base}}/opciones-menu
+
+###
+GET {{base}}/opciones-menu?tecla=3
+
+### El título va al LCD: ASCII y máximo 16 caracteres
+PATCH {{base}}/opciones-menu/1
+Content-Type: application/json
+
+{ "titulo": "Valor actual" }

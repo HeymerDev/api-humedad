@@ -42,9 +42,11 @@ api-humedad/
   modelos solo reflejan las tablas.
 - En los modelos **siempre** declarar el tipo: `@Column(DataType.FLOAT)`. `tsx`
   (desarrollo) no emite metadata de decoradores.
-- Capas: `routes` (rutas + validación zod) → `controller` (HTTP) → `service`
-  (lógica y acceso a datos). Las consultas de series temporales van en SQL
-  crudo (`sequelize.query` con `replacements`), nunca concatenando strings.
+- Capas: `routes` (rutas + `validar(...)` con zod) → `service` (lógica y acceso
+  a datos). Los catálogos usan la fábrica `crearCrud` y solo tienen
+  `routes.ts` + `schemas.ts`. Las consultas de series temporales van en SQL
+  crudo (`sequelize.query` con `replacements`/`bind`), nunca concatenando strings.
+- Los esquemas de creación son `.strict()`: un campo desconocido (ej. `id`) es 400.
 - Respuestas: éxito `{ data, meta? }`; listas con `meta: { total, limit, offset }`;
   error `{ error: { codigo, mensaje, detalles? } }`. Códigos 200/201/204/400/404/409/503.
 - Rutas en español, plural y kebab-case: `/api/v1/tipos-sensor`, `/api/v1/reglas-umbral`.
@@ -81,8 +83,15 @@ POST /api/v1/lecturas
     { "sensor": "temperatura_agua", "valor": 19.8, "medido_en": 1790000000 }
   ]
 }
-→ 201 { "data": { "lote_id": 123, "aceptadas": 3, "rechazadas": 0, "anomalias": 0, "hora_servidor": 1790000001 } }
+→ 201 { "data": { "lote_id": 123, "recibidas": 3, "aceptadas": 3, "rechazadas": 0, "duplicadas": 0,
+                  "invalidas": 0, "sospechosas": 0, "hora_servidor": 1790000001, "duracion_ms": 640 } }
 ```
+
+Si hay rechazos llega además `errores: [{ indice, sensor, motivo }]`. Cualquier
+2xx significa "no reintentar": las lecturas rechazadas fallarían igual. Solo
+se reintenta ante un error de red, un 5xx o un timeout, y es seguro hacerlo
+porque las lecturas ya guardadas vuelven como `duplicadas`. La tarea 8 agrega
+`anomalias` a la respuesta.
 
 `medido_en` acepta epoch (s) o ISO-8601; si falta se usa la hora del servidor.
 `hora_servidor` le sirve al ESP32 si el NTP falla.
@@ -182,47 +191,73 @@ dos veces cada una; aplicado en Neon dos veces sin errores.
 
 ---
 
-### [ ] 4. Infraestructura común de la API
+### [x] 4. Infraestructura común de la API
 
-- Middleware `validar({ body, query, params })` con zod.
-- Utilidades: paginación (`limit`/`offset` con máximos), parseo de fechas
-  (epoch o ISO), rango "hoy" en `APP_TIMEZONE`, formateo de líneas LCD.
-- Fábrica de CRUD para catálogos (list/get/create/update/delete) para no
-  repetir código en la tarea 5.
+- `validar({ body, query, params }, handler)` (`src/middlewares/validar.ts`):
+  el handler recibe los datos ya validados y tipados (en Express 5 `req.query`
+  es de solo lectura, por eso no se reescribe `req`).
+- `src/utils/paginacion.ts` (`limit` 1–500, por defecto 50), `fechas.ts`
+  (epoch s/ms o ISO-8601 → Date), `esquemas.ts` (helpers zod), `crear-crud.ts`
+  (fábrica REST con filtros, `include`, búsqueda por campo alterno y
+  `antesDeEliminar`).
+- `error-handler.ts`: errores zod con el campo exacto (`lecturas.2.valor`),
+  CHECK/NOT NULL/fuera de rango → 400, FK inexistente → 400, registro en uso
+  (FK o RESTRICT) → 409, cuerpo > 1 MB → 413.
+- El rango "hoy" en `APP_TIMEZONE` y el formateo LCD pasan a la tarea 10, que es donde se usan.
 
-**Commit**: `feat(api): agregar validación, paginación y fábrica de CRUD`
-
----
-
-### [ ] 5. CRUD de catálogos
-
-- `/api/v1/tipos-sensor`, `/ubicaciones`, `/dispositivos`, `/sensores`,
-  `/reglas-umbral` → `GET` (lista con filtros), `GET /:id`, `POST`, `PATCH /:id`, `DELETE /:id`.
-- `GET /dispositivos/:id/sensores`.
-- `/api/v1/opciones-menu` → `GET` (lista y por tecla) y `PATCH /:id`.
-
-**Aceptación**: probado con `docs/api.http`; 404/409/400 con el formato de error común.
-
-**Commit**: `feat(api): agregar CRUD de catálogos, dispositivos y reglas`
+**Commit**: `feat(api): agregar validacion, paginacion y fabrica de CRUD`
 
 ---
 
-### [ ] 6. Ingesta de lecturas desde el ESP32
+### [x] 5. CRUD de catálogos
+
+- `/tipos-sensor` y `/dispositivos` aceptan id o código en `/:id`
+  (`/tipos-sensor/DHT22_TEMP`, `/dispositivos/esp32_01`).
+- `/ubicaciones`, `/sensores`, `/reglas-umbral`: CRUD completo con filtros.
+- `GET /dispositivos/:ref/sensores`.
+- `/opciones-menu`: `GET` (con `?tecla=`), `GET /:id`, `PATCH /:id` (título ASCII ≤ 16).
+- Protecciones: borrar un sensor o dispositivo con lecturas → 409 (la FK
+  borraría su serie temporal en cascada; se desactiva con `activo: false`);
+  un sensor no cambia de dispositivo ni de tipo; las reglas validan sus
+  parámetros según `tipo_anomalia` con mensajes por campo.
+- `docs/api.http` con ejemplos de todos los endpoints.
+
+**Verificado**: 39 pruebas HTTP contra Neon (creación, duplicados, CHECK,
+FK, RESTRICT, filtros, paginación) con datos temporales que se borran al final.
+
+**Commit**: `feat(api): agregar CRUD de catalogos, dispositivos y reglas`
+
+---
+
+### [x] 6. Ingesta de lecturas desde el ESP32
 
 - `POST /api/v1/lecturas` (contrato de arriba), en una transacción:
-  1. Busca el dispositivo por `codigo` y los sensores por `etiqueta`.
-  2. Aplica calibración (`valor = crudo * escala + offset`), guarda `valor_crudo`.
-  3. Fuera del rango físico del tipo → `calidad = 'INVALIDA'` (se guarda, no se descarta).
-     Rechazar `NaN`/`Infinity` (el DHT22 los produce al fallar). Mantener la regla
-     del proyecto anterior: el DS18B20 reporta exactamente `0.0` cuando no
-     responde → `calidad = 'SOSPECHOSA'` (así están 1.005 lecturas actuales).
-  4. Crea el `lotes_envio` (origen, intento, aceptadas/rechazadas, errores, duración).
-  5. Inserta las `lecturas` con `bulkCreate` y actualiza `dispositivos.ultima_conexion` e IP.
-- `GET /api/v1/lecturas` con filtros `sensor_id`, `dispositivo`, `desde`, `hasta` (rango obligatorio, máx. 31 días) y paginación.
-- `GET /api/v1/lotes-envio` con filtros.
+  1. Busca el dispositivo por `codigo` (404 si no existe, 409 si está desactivado)
+     y los sensores por `etiqueta`.
+  2. Valida cada lectura por separado: una mala se rechaza con su índice y
+     motivo, y el resto se guarda. Motivos: sensor no registrado o inactivo,
+     `valor` null o no numérico (NaN del DHT22), `medido_en` en el futuro
+     (> 5 min) o de hace más de 30 días (NTP sin sincronizar), repetida en el lote.
+  3. Calibra (`valor = crudo * escala + offset`) y guarda `valor_crudo`.
+  4. Calidad: fuera del rango físico → `INVALIDA`; DS18B20 en `0.0` →
+     `SOSPECHOSA`. Ambas se guardan; la analítica solo usará las `OK`.
+  5. Inserta con `INSERT ... ON CONFLICT (sensor_id, medido_en) DO NOTHING`:
+     **reintentar un lote no duplica datos** (las repetidas salen como `duplicadas`).
+  6. Registra el `lotes_envio` (origen, intento, conteos, errores, duración)
+     y actualiza `dispositivos.ultima_conexion`. La IP y el firmware llegan con
+     el latido (tarea 9): desde la ingesta solo se vería la IP pública del router.
+- Esquema: índice único `uq_lecturas_sensor_medido (sensor_id, medido_en)`, que
+  reemplaza a `ix_lecturas_sensor_tiempo` (aplicado en Neon).
+- `GET /api/v1/lecturas`: `dispositivo`, `sensor_id`, `calidad`, `desde`/`hasta`
+  (por defecto últimas 24 h, máx. 31 días), `orden`, paginación.
+- `GET /api/v1/lotes-envio` (`dispositivo`, `origen`, `con_rechazos`, fechas) y
+  `GET /lotes-envio/:id` con sus lecturas.
 
-**Aceptación**: un lote con un sensor inexistente responde 201 con esa lectura en
-`rechazadas` y el detalle en `lotes_envio.errores`.
+**Verificado**: 28 pruebas HTTP con un dispositivo temporal (lote mixto 4 + 6,
+reintento → 4 duplicadas, BUFFER, calibración 24.6 + 0.5 = 25.1, filtros,
+errores 400/404/409). Se borró al terminar; las 3.039 lecturas de `esp32_01`
+quedaron intactas. Un lote tarda ~0,6–3 s según la latencia a Neon, así que
+el ESP32 debe usar un timeout HTTP de al menos 10 s.
 
 **Commit**: `feat(lecturas): agregar ingesta por lotes del ESP32 y consulta de lecturas`
 
@@ -264,7 +299,8 @@ respuesta de la ingesta informa cuántas anomalías hubo.
 ### [ ] 9. Latidos y vigilancia de dispositivos
 
 - `POST /api/v1/dispositivos/:codigo/estados-conexion` (guarda el latido y
-  actualiza `ultima_conexion`) y `GET` del historial.
+  actualiza `ultima_conexion`, `direccion_ip` y `version_firmware` del
+  dispositivo) y `GET` del historial.
 - Tarea periódica dentro de la API (cada 60 s):
   - `SENSOR_SIN_DATOS` si un sensor activo no envía en `ventana_minutos`.
   - Resuelve automáticamente alertas sin ocurrencias recientes.
@@ -275,6 +311,8 @@ respuesta de la ingesta informa cuántas anomalías hubo.
 
 ### [ ] 10. Analítica del menú (teclas 1–7)
 
+- Utilidades: rango "hoy" en `APP_TIMEZONE` y formateo de líneas LCD
+  (recorte al ancho, sin tildes porque el HD44780 no las muestra).
 - `src/modules/analitica`: los 7 endpoints de la tabla del contrato, en SQL
   crudo con `time_bucket`, `avg`, `min/max`, `stddev_samp`, `regr_slope`,
   `percentile_cont`, siempre filtrando por tiempo.

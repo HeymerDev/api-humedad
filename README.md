@@ -51,6 +51,19 @@ Comprueba la conexión en `http://localhost:3000/health`
 Para validar un script SQL sin dejar cambios:
 `npx tsx src/database/ejecutar-sql.ts <archivo.sql> --probar` (hace ROLLBACK).
 
+## Endpoints (`/api/v1`)
+
+| Recurso | Operaciones |
+|---------|-------------|
+| `/lecturas` | `POST` lote del ESP32 · `GET` con filtros (últimas 24 h por defecto) |
+| `/lotes-envio` | `GET` lista y `GET /:id` con sus lecturas |
+| `/dispositivos` | CRUD (`/:id` acepta el código) · `GET /:ref/sensores` |
+| `/sensores`, `/ubicaciones`, `/reglas-umbral` | CRUD |
+| `/tipos-sensor` | CRUD (`/:id` acepta el código) |
+| `/opciones-menu` | `GET`, `GET /:id`, `PATCH /:id` |
+
+Ejemplos listos para ejecutar en [`docs/api.http`](docs/api.http) (extensión REST Client de VS Code).
+
 ## Documentación
 
 - [`DIAGRAMA_ER.md`](DIAGRAMA_ER.md): modelo entidad-relación (12 tablas, 2 hypertables).
