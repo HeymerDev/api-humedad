@@ -64,6 +64,71 @@ GET {{base}}/lotes-envio/1
 
 
 ### =====================================================================
+###  Latidos del ESP32 (cada 60 s) y vigilancia
+### =====================================================================
+
+### Latido: estado del Wi-Fi, memoria y buffer pendiente
+POST {{base}}/dispositivos/esp32_01/estados-conexion
+Content-Type: application/json
+
+{
+  "ntp_sincronizado": true,
+  "rssi_dbm": -61,
+  "ip": "192.168.1.50",
+  "uptime_s": 3600,
+  "heap_libre_bytes": 180000,
+  "lecturas_en_buffer": 0,
+  "reconexiones_wifi": 1,
+  "envios_fallidos": 0,
+  "version_firmware": "1.0.0"
+}
+
+### Historial de latidos (por defecto últimas 24 h)
+GET {{base}}/dispositivos/esp32_01/estados-conexion
+
+### Correr la vigilancia ya (sensores sin datos y alertas que se resuelven solas)
+POST {{base}}/vigilancia/ejecuciones
+
+
+### =====================================================================
+###  Anomalías y alertas
+### =====================================================================
+
+### Anomalías sin revisar de un dispositivo
+GET {{base}}/anomalias?dispositivo=esp32_01&revisada=false
+
+### Solo saltos bruscos
+GET {{base}}/anomalias?tipo=SALTO_BRUSCO
+
+### Detalle con la regla que la detectó y las alertas que abrió
+GET {{base}}/anomalias/1
+
+### Marcar como revisada
+PATCH {{base}}/anomalias/1
+Content-Type: application/json
+
+{ "revisada": true }
+
+### Alertas activas (ABIERTA o RECONOCIDA): lo que cuenta la tecla 6
+GET {{base}}/alertas?activas=true
+
+### Alertas de un dispositivo por severidad
+GET {{base}}/alertas?dispositivo=esp32_01&severidad=ALTA
+
+### Reconocer una alerta
+PATCH {{base}}/alertas/1
+Content-Type: application/json
+
+{ "estado": "RECONOCIDA" }
+
+### Resolverla
+PATCH {{base}}/alertas/1
+Content-Type: application/json
+
+{ "estado": "RESUELTA" }
+
+
+### =====================================================================
 ###  Dispositivos (`:id` acepta id o código)
 ### =====================================================================
 

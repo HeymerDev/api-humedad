@@ -90,8 +90,8 @@ POST /api/v1/lecturas
 Si hay rechazos llega además `errores: [{ indice, sensor, motivo }]`. Cualquier
 2xx significa "no reintentar": las lecturas rechazadas fallarían igual. Solo
 se reintenta ante un error de red, un 5xx o un timeout, y es seguro hacerlo
-porque las lecturas ya guardadas vuelven como `duplicadas`. La tarea 8 agrega
-`anomalias` a la respuesta.
+porque las lecturas ya guardadas vuelven como `duplicadas`. La respuesta trae
+además `anomalias` y `alertas_abiertas` (tarea 8).
 
 `medido_en` acepta epoch (s) o ISO-8601; si falta se usa la hora del servidor.
 `hora_servidor` le sirve al ESP32 si el NTP falla.
@@ -263,47 +263,77 @@ el ESP32 debe usar un timeout HTTP de al menos 10 s.
 
 ---
 
-### [ ] 7. Simulador del ESP32
+### [x] 7. Simulador del ESP32
 
-- `src/database/simular-esp32.ts` (`npm run simular`): envía a la API un lote
-  cada 20 s y un latido cada 60 s, con valores realistas y, de vez en cuando,
-  un salto o un valor fuera de rango para probar el detector.
-- Solo para pruebas: usar una rama de Neon o limpiar después (los datos para
-  KNIME y FlowiseAI deben venir de los sensores reales).
+- `src/database/simular-esp32.ts` (`npm run simular`): se comporta como el
+  firmware. Envía un lote cada 20 s y un latido cada 60 s, con valores con
+  ciclo diario y ruido. Además simula:
+  - anomalías inyectadas (salto, fuera de rango, NaN, DS18B20 en 0.0);
+  - cortes de Wi-Fi con buffer y reenvío como `BUFFER`;
+  - hasta 3 reintentos con `intento` creciente.
+- Opciones: `--intervalo`, `--latido`, `--ciclos`, `--historico <min>` (rellena
+  hacia atrás a 20 s), `--congelar <etiqueta>`, `--prob-anomalia`, `--prob-corte`,
+  `--url` y `--limpiar` (borra el dispositivo simulado y todos sus datos).
+- Usa su propio dispositivo `esp32_sim` y **se niega a simular sobre `esp32_01`**
+  (exige `--forzar`). Los datos para KNIME y FlowiseAI deben ser los reales.
 
 **Commit**: `chore: agregar simulador del ESP32 para pruebas locales`
 
 ---
 
-### [ ] 8. Detector de anomalías y alertas
+### [x] 8. Detector de anomalías y alertas
 
-- `anomalias.service`: al ingerir cada lote evalúa las reglas activas del
-  sensor (las específicas del sensor tienen prioridad sobre las del tipo):
-  - `FUERA_DE_RANGO` (UMBRAL: `valor_min`/`valor_max`)
-  - `SALTO_BRUSCO` (UMBRAL o MEDIA_MOVIL: `delta_max` contra la lectura anterior o la media de la ventana)
-  - `OUTLIER_ESTADISTICO` (ZSCORE: `|z| > factor`; IQR: fuera de `Q1 − k·IQR, Q3 + k·IQR`) con `ventana_minutos` y `minimo_muestras`
-  - `VALOR_CONGELADO` (mismo valor durante `ventana_minutos`)
-- `alertas.service`: cada anomalía con severidad ≥ MEDIA abre una alerta o, si ya
-  hay una ABIERTA/RECONOCIDA del mismo sensor y tipo, suma `ocurrencias`.
-- `GET /api/v1/anomalias`, `PATCH /anomalias/:id` (`revisada`).
-- `GET /api/v1/alertas`, `GET /alertas/:id`, `PATCH /alertas/:id` (`estado`:
-  ABIERTA → RECONOCIDA → RESUELTA, rellena `reconocido_en`/`resuelto_en`).
+- `anomalias.detector.ts`: corre **después** de guardar cada lote (si falla,
+  las lecturas no se pierden y la respuesta trae `anomalias: null`). Las
+  estadísticas de ventana de todo el lote salen en una sola consulta con
+  `LATERAL`. Por tipo de anomalía gana la regla más específica: sensor > tipo > global.
+  - `FUERA_DE_RANGO`: regla `valor_min`/`valor_max`. Además, toda lectura
+    `INVALIDA` (fuera del rango físico) genera esta anomalía con severidad ALTA.
+  - `SALTO_BRUSCO`: UMBRAL contra la lectura anterior (≤ 10 min) o MEDIA_MOVIL
+    contra la media de la ventana.
+  - `OUTLIER_ESTADISTICO`: ZSCORE o IQR sobre las lecturas OK de la ventana.
+    Ignora desviaciones menores que la precisión del sensor (ruido).
+  - `VALOR_CONGELADO`: mismo valor exacto durante toda la ventana; registra
+    una anomalía por ventana, no una por lectura.
+- `alertas.service.ts`: abre una alerta desde severidad `ALERTA_SEVERIDAD_MINIMA`
+  (MEDIA). Si ya hay una activa del mismo sensor y tipo, suma `ocurrencias`.
+  Para eso usa `INSERT ... ON CONFLICT` sobre el índice único parcial.
+- `GET /anomalias` (filtros), `GET /anomalias/:id`, `PATCH /anomalias/:id` (`revisada`).
+- `GET /alertas` (`activas`, `estado`, `dispositivo`...), `GET /alertas/:id`,
+  `PATCH /alertas/:id` (ABIERTA → RECONOCIDA → RESUELTA; una RESUELTA no se reabre).
+- La ingesta responde además `anomalias` y `alertas_abiertas`.
 
-**Aceptación**: con el simulador aparecen anomalías y alertas agrupadas; la
-respuesta de la ingesta informa cuántas anomalías hubo.
-
-**Commit**: `feat(anomalias): detectar anomalías al ingerir y generar alertas`
+**Commit**: `feat(anomalias): detectar anomalias al ingerir y generar alertas`
 
 ---
 
-### [ ] 9. Latidos y vigilancia de dispositivos
+### [x] 9. Latidos y vigilancia de dispositivos
 
-- `POST /api/v1/dispositivos/:codigo/estados-conexion` (guarda el latido y
-  actualiza `ultima_conexion`, `direccion_ip` y `version_firmware` del
-  dispositivo) y `GET` del historial.
-- Tarea periódica dentro de la API (cada 60 s):
-  - `SENSOR_SIN_DATOS` si un sensor activo no envía en `ventana_minutos`.
-  - Resuelve automáticamente alertas sin ocurrencias recientes.
+- `POST /api/v1/dispositivos/:ref/estados-conexion`: guarda el latido en la
+  hypertable y actualiza en el dispositivo `ultima_conexion`, `direccion_ip` y
+  `version_firmware`. `GET` devuelve el historial (últimas 24 h por defecto).
+- Vigilancia dentro de la API cada `VIGILANCIA_INTERVALO_SEG` (60 s; 0 = apagada)
+  y bajo demanda con `POST /api/v1/vigilancia/ejecuciones`:
+  - `SENSOR_SIN_DATOS`: sensor activo sin lecturas en `ventana_minutos`.
+    Registra una anomalía por silencio, sin repetirla en cada pasada.
+  - Auto-resolución: `SENSOR_SIN_DATOS` cuando el sensor vuelve a enviar; el
+    resto, tras `ALERTA_AUTO_RESOLVER_MIN` (120) sin repeticiones. El mensaje
+    indica que se resolvió sola.
+
+**Verificado (tareas 7–9)**:
+- Simulación de 90 min de histórico más ciclos en vivo con anomalías forzadas.
+- 26 pruebas HTTP: saltos, rangos, valor congelado, alertas agrupadas y su
+  ciclo de estados, latidos y vigilancia con resolución automática.
+- Al terminar todo se limpió y la BD quedó como estaba (3.039 lecturas, 0
+  anomalías o alertas).
+
+**Al arrancar la API**: la vigilancia abrirá 3 alertas ALTA "sin datos" para
+`esp32_01`, porque no envía desde el 8/9. Es lo correcto, y se resuelven solas
+cuando el ESP32 vuelva a enviar.
+
+**Firmware**: un lote del buffer de 498 lecturas tarda ~4 s de punta a punta
+(detección incluida) y el primero tras arrancar la API puede tardar más.
+Conviene vaciar el buffer en lotes de ~150 lecturas con un timeout de 15 s.
 
 **Commit**: `feat(dispositivos): registrar latidos y vigilar sensores sin datos`
 
