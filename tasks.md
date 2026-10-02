@@ -99,8 +99,9 @@ además `anomalias` y `alertas_abiertas` (tarea 8).
 Latido (cada 60 s): `POST /api/v1/dispositivos/esp32_01/estados-conexion`
 con `{ ntp_sincronizado, rssi_dbm, ip, uptime_s, heap_libre_bytes, lecturas_en_buffer, reconexiones_wifi, envios_fallidos, version_firmware }`.
 
-Menú: `GET /api/v1/analitica/<opcion>?dispositivo=esp32_01&lcd=16x2` → JSON
-pequeño con `data` + `lcd` (líneas ya recortadas al ancho del display).
+Menú: `GET /api/v1/analitica/<opcion>?dispositivo=esp32_01&lcd=16x2&solo_lcd=true` →
+`{ lcd: { columnas, filas, paginas } }`, con páginas ya recortadas al display.
+Contrato definitivo en `docs/esp32.md`.
 
 | Tecla | Endpoint | Concepto de analítica |
 |-------|----------|-----------------------|
@@ -339,38 +340,60 @@ Conviene vaciar el buffer en lotes de ~150 lecturas con un timeout de 15 s.
 
 ---
 
-### [ ] 10. Analítica del menú (teclas 1–7)
+### [x] 10. Analítica del menú (teclas 1–7)
 
-- Utilidades: rango "hoy" en `APP_TIMEZONE` y formateo de líneas LCD
-  (recorte al ancho, sin tildes porque el HD44780 no las muestra).
-- `src/modules/analitica`: los 7 endpoints de la tabla del contrato, en SQL
-  crudo con `time_bucket`, `avg`, `min/max`, `stddev_samp`, `regr_slope`,
-  `percentile_cont`, siempre filtrando por tiempo.
-- Cada respuesta incluye `lcd` (líneas para 16x2 o 20x4 según `?lcd=`).
-- Si llega `?dispositivo=`, se registra la consulta en `consultas_menu`
-  (opción, duración, éxito o error). `GET /api/v1/consultas-menu`.
+- `src/utils/lcd.ts`: paso a ASCII (sin tildes ni `°`), abreviaturas
+  (`temperatura_aire` → `T.aire`) y paginado en bloques por sensor: 1 sensor
+  por página en 16x2 y 2 en 20x4. `src/utils/tiempo.ts`: "hoy" en
+  `APP_TIMEZONE` resuelto en SQL, hora local y antigüedad ("12s", "24d").
+- `src/modules/analitica`: las 7 opciones en SQL crudo con filtro de tiempo.
+  1. Última lectura por sensor (ordered append, `LIMIT 1`).
+  2. `avg`/`min`/`max` de la ventana más serie de 10 min con `time_bucket`.
+  3. Máximo y mínimo del día con su hora (`?fecha=` para otro día).
+  4. `stddev_samp`, coeficiente de variación, `regr_slope` por hora y `regr_r2`.
+     La tendencia es ESTABLE si el cambio en la ventana es menor que la
+     precisión del sensor.
+  5. Z-score e IQR (`percentile_cont`) con límites, conteos y ejemplos, más
+     las anomalías que el detector registró en la ventana.
+  6. Alertas activas por severidad y las 5 principales.
+  7. Ping a la BD, último latido y último lote, estado ONLINE/OFFLINE.
+- Respuesta `{ data, lcd: { columnas, filas, paginas } }`.
+  - `solo_lcd=true` para el ESP32 (~150 bytes).
+  - `registrar=false` para pruebas.
+- Cada consulta válida queda en `consultas_menu` (duración, éxito o error).
+  `GET /consultas-menu` y `GET /consultas-menu/resumen` (uso por tecla).
+  `GET /analitica` es el índice tecla → endpoint.
 
-**Aceptación**: las 7 opciones responden en < 500 ms con datos del simulador y
-dejan su registro en `consultas_menu`.
+**Verificado**: con 2 h simuladas, las 7 teclas responden con páginas válidas
+(ASCII, ≤ 16 columnas, ≤ 2 filas), en ~400 ms del lado del servidor y ~600 ms
+de punta a punta. También sobre los datos reales de `esp32_01` del 7/9.
 
-**Commit**: `feat(analitica): agregar endpoints del menú del teclado con salida para LCD`
+**Commit**: `feat(analitica): agregar endpoints del menu del teclado con salida para LCD`
 
 ---
 
-### [ ] 11. Endpoints de evidencia TimescaleDB
+### [x] 11. Endpoints de evidencia TimescaleDB
 
-- `GET /api/v1/timescale/hypertables`, `/chunks` (de `timescaledb_information.chunks`)
-  y `/tamanos` (`chunks_detailed_size`, filas por chunk) para la sustentación en vivo.
+- `GET /timescale`: versión, licencia e hypertables (`chunk_time_interval`,
+  chunks, tamaño, filas aproximadas).
+- `GET /timescale/chunks?hypertable=`: rango, filas y tamaño de cada chunk.
+- `GET /timescale/plan?minutos=`: `EXPLAIN` de "promedio de los últimos N
+  min" con los chunks recorridos frente a los totales (chunk exclusion en vivo).
+- `GET /timescale/volumen?dias=`: lecturas por día y sensor con `time_bucket`
+  frente a las 4.320 esperadas.
 
-**Commit**: `feat(timescale): exponer hypertables y chunks para la sustentación`
+**Commit**: `feat(timescale): exponer hypertables, chunks y chunk exclusion para la sustentacion`
 
 ---
 
-### [ ] 12. Documentación
+### [x] 12. Documentación
 
-- `README.md` completo: instalación, variables, scripts, endpoints.
-- `docs/api.http` (REST Client de VS Code) con todas las peticiones de ejemplo.
-- `docs/esp32.md`: contrato definitivo, manejo de reintentos/buffer y ejemplo con ArduinoJson.
+- `README.md` completo: instalación, variables, scripts, simulador,
+  endpoints, menú, base de datos y estructura.
+- `docs/api.http`: todas las peticiones de ejemplo.
+- `docs/esp32.md`: contrato definitivo (lecturas, latido, menú), política de
+  reintentos y buffer, tabla tecla ↔ concepto de analítica (entregable del
+  componente 2) y un sketch de referencia con ArduinoJson 7 (no probado en hardware).
 
 **Commit**: `docs: documentar endpoints, contrato del ESP32 y ejemplos de uso`
 

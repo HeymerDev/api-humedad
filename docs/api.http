@@ -64,6 +64,71 @@ GET {{base}}/lotes-envio/1
 
 
 ### =====================================================================
+###  Analítica del menú del teclado (teclas 1-7)
+###  &registrar=false evita guardar la prueba en consultas_menu
+### =====================================================================
+
+### Qué endpoint resuelve cada tecla
+GET {{base}}/analitica
+
+### 1 · Valor actual de cada sensor
+GET {{base}}/analitica/valores-actuales?dispositivo=esp32_01&registrar=false
+
+### 2 · Promedio de la última hora (serie en tramos de 10 min)
+GET {{base}}/analitica/promedio-hora?dispositivo=esp32_01&registrar=false
+
+### 3 · Máximo y mínimo del día (hoy en America/Bogota)
+GET {{base}}/analitica/extremos-dia?dispositivo=esp32_01&registrar=false
+
+### 3 · ... de otro día
+GET {{base}}/analitica/extremos-dia?dispositivo=esp32_01&fecha=2026-09-07&registrar=false
+
+### 4 · Desviación estándar y tendencia (últimas 2 h)
+GET {{base}}/analitica/tendencia?dispositivo=esp32_01&minutos=120&registrar=false
+
+### 5 · Outliers por Z-score e IQR
+GET {{base}}/analitica/outliers?dispositivo=esp32_01&z=3&k=1.5&registrar=false
+
+### 6 · Alertas activas
+GET {{base}}/analitica/alertas-activas?dispositivo=esp32_01&registrar=false
+
+### 7 · Estado de conexión a la nube
+GET {{base}}/analitica/estado-conexion?dispositivo=esp32_01&registrar=false
+
+### Como lo pide el ESP32: solo las páginas del LCD
+GET {{base}}/analitica/promedio-hora?dispositivo=esp32_01&lcd=16x2&solo_lcd=true
+
+### LCD de 20x4 (dos sensores por página)
+GET {{base}}/analitica/valores-actuales?dispositivo=esp32_01&lcd=20x4&registrar=false
+
+### Consultas hechas desde el teclado
+GET {{base}}/consultas-menu?dispositivo=esp32_01
+
+### Uso de cada tecla (consultas, fallos, duración media)
+GET {{base}}/consultas-menu/resumen
+
+
+### =====================================================================
+###  Evidencias de TimescaleDB (sustentación)
+### =====================================================================
+
+### Versión, licencia e hypertables con su chunk_time_interval
+GET {{base}}/timescale
+
+### Chunks de lecturas: rango, filas y tamaño
+GET {{base}}/timescale/chunks?hypertable=lecturas
+
+### Chunks de estados_conexion
+GET {{base}}/timescale/chunks?hypertable=estados_conexion
+
+### Chunk exclusion: cuántos chunks recorre "promedio de la última hora"
+GET {{base}}/timescale/plan?minutos=60
+
+### Lecturas por día y sensor vs las 4.320 esperadas
+GET {{base}}/timescale/volumen?dias=30
+
+
+### =====================================================================
 ###  Latidos del ESP32 (cada 60 s) y vigilancia
 ### =====================================================================
 
