@@ -223,6 +223,9 @@ erDiagram
   La justificación completa está en [`docs/timescaledb.md`](docs/timescaledb.md).
 - TimescaleDB exige que la columna de tiempo forme parte de la PK; por eso ambas
   usan PK compuesta `(id, <columna de tiempo>)`.
+- `lecturas` tiene además un índice único `(sensor_id, medido_en)`: un sensor
+  no puede tener dos lecturas en el mismo instante, y así los reintentos del
+  ESP32 no duplican datos.
 - `anomalias (lectura_id, lectura_medido_en)` es una FK compuesta hacia la
   hypertable `lecturas`, que TimescaleDB 2.24 admite. Si se borra la lectura,
   la anomalía se conserva con `lectura_id = NULL`. En `SENSOR_SIN_DATOS` no hay

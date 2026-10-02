@@ -185,10 +185,15 @@ DO $$ BEGIN
         FOREIGN KEY (lote_id) REFERENCES lotes_envio (id) ON DELETE SET NULL;
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
--- Índice principal de consulta: "lecturas del sensor X entre t1 y t2"
-CREATE INDEX IF NOT EXISTS ix_lecturas_sensor_tiempo ON lecturas (sensor_id, medido_en);
+-- Un sensor no puede tener dos lecturas en el mismo instante. Además de ser
+-- el índice principal de consulta ("lecturas del sensor X entre t1 y t2"),
+-- hace idempotente la ingesta: si el ESP32 reintenta un lote que sí llegó,
+-- las repetidas se descartan con ON CONFLICT DO NOTHING. En una hypertable
+-- un índice único debe incluir la columna de tiempo: (sensor_id, medido_en) la incluye.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_lecturas_sensor_medido ON lecturas (sensor_id, medido_en);
 CREATE INDEX IF NOT EXISTS ix_lecturas_lote_id ON lecturas (lote_id);
--- v1 tenía un índice solo por sensor_id: lo cubre ix_lecturas_sensor_tiempo
+-- Índices de v1 que cubre uq_lecturas_sensor_medido
+DROP INDEX IF EXISTS ix_lecturas_sensor_tiempo;
 DROP INDEX IF EXISTS ix_lecturas_sensor_id;
 COMMENT ON TABLE lecturas IS 'Serie temporal de mediciones (hypertable de TimescaleDB, chunk de 1 día)';
 COMMENT ON COLUMN lecturas.medido_en IS 'Momento de la medición según el ESP32 (dimensión de tiempo de la hypertable)';
