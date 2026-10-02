@@ -3,6 +3,7 @@ import { sequelize } from '../../config/database';
 import { Dispositivo, Lectura, LoteEnvio, Sensor, type CalidadLectura, type ErrorLectura } from '../../models';
 import { aEpoch } from '../../utils/fechas';
 import { HttpError } from '../../utils/http-error';
+import { detectarAnomalias, type LecturaNueva } from '../anomalias/anomalias.detector';
 import { buscarDispositivo } from '../dispositivos/dispositivos.service';
 import { esquemaLectura, type EntradaLote, type FiltrosLecturas } from './lecturas.schemas';
 
@@ -105,7 +106,7 @@ export async function ingerirLote(entrada: EntradaLote) {
     filas.push({ indice, sensor_id: sensor.id, etiqueta, medido_en, valor, valor_crudo: crudo, ...evaluarCalidad(valor, crudo, sensor) });
   });
 
-  return sequelize.transaction(async (transaction) => {
+  const { nuevas, respuesta } = await sequelize.transaction(async (transaction) => {
     const lote = await LoteEnvio.create(
       {
         dispositivo_id: dispositivo.id,
@@ -159,19 +160,56 @@ export async function ingerirLote(entrada: EntradaLote) {
     const porCalidad = (calidad: CalidadLectura) =>
       filas.filter((f) => f.calidad === calidad && guardadas.has(`${f.sensor_id}|${f.medido_en.getTime()}`)).length;
 
+    // Lecturas realmente guardadas, con lo que el detector necesita de su sensor
+    const porClave = new Map(filas.map((f) => [`${f.sensor_id}|${f.medido_en.getTime()}`, f]));
+    const nuevas: LecturaNueva[] = insertadas.map((l) => {
+      const fila = porClave.get(`${l.sensor_id}|${new Date(l.medido_en).getTime()}`)!;
+      const tipo = porEtiqueta.get(fila.etiqueta)!.tipo_sensor!;
+      return {
+        id: l.id,
+        sensor_id: fila.sensor_id,
+        tipo_sensor_id: tipo.id,
+        etiqueta: fila.etiqueta,
+        unidad: tipo.unidad,
+        precision: tipo.precision ?? null,
+        medido_en: fila.medido_en,
+        valor: fila.valor,
+        calidad: fila.calidad,
+        rango_fisico: [tipo.rango_min, tipo.rango_max] as [number, number],
+      };
+    });
+
     return {
-      lote_id: lote.id,
-      recibidas: entrada.lecturas.length,
-      aceptadas: insertadas.length,
-      rechazadas: errores.length,
-      duplicadas: duplicadas.length,
-      invalidas: porCalidad('INVALIDA'),
-      sospechosas: porCalidad('SOSPECHOSA'),
-      hora_servidor: aEpoch(ahora),
-      duracion_ms,
-      ...(errores.length ? { errores } : {}),
+      nuevas,
+      respuesta: {
+        lote_id: lote.id,
+        recibidas: entrada.lecturas.length,
+        aceptadas: insertadas.length,
+        rechazadas: errores.length,
+        duplicadas: duplicadas.length,
+        invalidas: porCalidad('INVALIDA'),
+        sospechosas: porCalidad('SOSPECHOSA'),
+        hora_servidor: aEpoch(ahora),
+        duracion_ms,
+        ...(errores.length ? { errores } : {}),
+      },
     };
   });
+
+  // Fuera de la transacción: si el detector falla, las lecturas ya quedaron
+  // guardadas y el ESP32 no debe reintentar (recibe 201 con anomalias: null).
+  let deteccion: Awaited<ReturnType<typeof detectarAnomalias>> | null = null;
+  try {
+    deteccion = await detectarAnomalias(nuevas);
+  } catch (error) {
+    console.error(`Detector de anomalías falló en el lote ${respuesta.lote_id}:`, error);
+  }
+
+  return {
+    ...respuesta,
+    anomalias: deteccion?.anomalias ?? null,
+    alertas_abiertas: deteccion?.alertas_abiertas ?? null,
+  };
 }
 
 /** GET /api/v1/lecturas: siempre acotado en el tiempo para aprovechar los chunks. */

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { SEVERIDADES } from '../models/enums';
 
 // Carga .env si existe. En Render las variables llegan por el entorno y no hay archivo.
 try {
@@ -29,6 +30,10 @@ const esquemaEnv = z.object({
   APP_TIMEZONE: z.string().default('America/Bogota'),
   LECTURA_INTERVALO_SEG: z.coerce.number().int().positive().default(20),
   DISPOSITIVO_OFFLINE_SEG: z.coerce.number().int().positive().default(90),
+
+  ALERTA_SEVERIDAD_MINIMA: z.enum(SEVERIDADES).default('MEDIA'),
+  ALERTA_AUTO_RESOLVER_MIN: z.coerce.number().int().positive().default(120),
+  VIGILANCIA_INTERVALO_SEG: z.coerce.number().int().min(0).default(60),
 });
 
 const resultado = esquemaEnv.safeParse(process.env);
