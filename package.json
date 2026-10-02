@@ -16,7 +16,8 @@
     "db:schema": "tsx src/database/ejecutar-sql.ts database/schema.sql",
     "db:seed": "tsx src/database/ejecutar-sql.ts database/seed.sql",
     "db:evidencias": "tsx src/database/ejecutar-sql.ts database/consultas/evidencias.sql --todo",
-    "db:verificar": "tsx src/database/verificar-modelos.ts"
+    "db:verificar": "tsx src/database/verificar-modelos.ts",
+    "simular": "tsx src/database/simular-esp32.ts"
   },
   "dependencies": {
     "cors": "^2.8.6",
