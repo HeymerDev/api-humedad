@@ -1,0 +1,22 @@
+# Blueprint de Render: New → Blueprint → elegir este repositorio.
+# Render pedirá DATABASE_URL al crear el servicio (no se guarda en el repo).
+services:
+  - type: web
+    name: api-humedad
+    runtime: node
+    # Neon está en AWS us-east-2 (Ohio): misma región = menos latencia a la BD
+    region: ohio
+    plan: free
+    branch: main
+    # Con NODE_ENV=production npm ci omite devDependencies (TypeScript): se incluyen para compilar
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: "22"
+      - key: DATABASE_URL
+        sync: false

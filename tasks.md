@@ -399,10 +399,27 @@ de punta a punta. También sobre los datos reales de `esp32_01` del 7/9.
 
 ---
 
-### [ ] 13. Despliegue en Render
+### [x] 13. Despliegue en Render (configuración)
 
-- `render.yaml` (build `npm ci && npm run build`, start `npm start`, health check `/health`).
-- Variables de entorno en Render (solo `DATABASE_URL` obligatoria).
-- Prueba del ESP32 contra la URL pública.
+- `render.yaml` (Blueprint): servicio web Node 22, región `ohio` (la misma de
+  AWS que Neon), plan free, build `npm ci --include=dev && npm run build` (sin
+  `--include=dev` no se instala TypeScript con `NODE_ENV=production`), start
+  `npm start`, health check `/health`, autodeploy desde `main`. `DATABASE_URL`
+  con `sync: false`: Render la pide al crear el servicio y no va al repo.
+- **Verificado en local**: build y arranque con `NODE_ENV=production`
+  (`/health`, `/timescale` y la validación responden igual que en desarrollo).
 
-**Commit**: `chore(deploy): agregar configuración de despliegue en Render`
+**Pendiente (lo hace el dueño de la cuenta de Render)**:
+1. Render → **New → Blueprint** → repositorio `HeymerDev/api-humedad`.
+2. Pegar `DATABASE_URL` cuando lo pida.
+3. Abrir `https://<servicio>.onrender.com/health` → `baseDatos: "OK"`.
+4. Poner esa URL en `API` del firmware y probar con
+   `npm run simular -- --url https://<servicio>.onrender.com --ciclos 3 --intervalo 5`.
+   Después borrar los datos simulados con `npm run simular -- --limpiar`.
+
+**Plan free**: el servicio se duerme tras 15 min sin tráfico. Con el ESP32
+enviando cada 20 s se mantiene despierto, pero tras una pausa la primera
+petición puede tardar ~1 min (el reintento con buffer del firmware lo cubre).
+Mientras está dormido no corre la vigilancia de sensores sin datos.
+
+**Commit**: `chore(deploy): agregar configuracion de despliegue en Render`

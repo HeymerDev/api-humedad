@@ -105,6 +105,19 @@ datos. Otras opciones: `--congelar <sensor>`, `--prob-corte`, `--url`.
 El simulador nunca escribe sobre la estación real `esp32_01`, que alimenta
 KNIME y FlowiseAI.
 
+## Despliegue en Render
+
+El repositorio incluye [`render.yaml`](render.yaml):
+
+1. En Render, **New → Blueprint** y elige este repositorio.
+2. Pega la `DATABASE_URL` de Neon cuando la pida. No se guarda en el repo.
+3. Comprueba `https://<servicio>.onrender.com/health` y pon esa URL en el
+   firmware del ESP32.
+
+El servicio usa la región `ohio`, la misma de AWS que Neon. En el plan free se
+duerme tras 15 min sin tráfico: la primera petición después de una pausa puede
+tardar ~1 min.
+
 ## Endpoints (`/api/v1`)
 
 Ejemplos listos para ejecutar en [`docs/api.http`](docs/api.http) (extensión
